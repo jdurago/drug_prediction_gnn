@@ -1,0 +1,280 @@
+# Copyright 2017-2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"). You
+# may not use this file except in compliance with the License. A copy of
+# the License is located at
+#
+#     http://aws.amazon.com/apache2.0/
+#
+# or in the "license" file accompanying this file. This file is
+# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+# ANY KIND, either express or implied. See the License for the specific
+# language governing permissions and limitations under the License.
+import ast
+import argparse
+import logging
+import os
+import numpy as np
+import pandas as pd
+import torch
+
+import dgl
+from dgl.model_zoo.chem import GCNClassifier
+from dgl.data.utils import split_dataset
+
+from torch.utils.data import DataLoader
+from torch.nn import BCEWithLogitsLoss
+from torch.optim import Adam
+
+from sklearn.metrics import roc_auc_score
+from utils import smiles_to_dgl_graph
+from tqdm import tqdm
+
+
+def collate_molgraphs(data):
+    """Batching a list of datapoints for dataloader.
+    Parameters
+    ----------
+    data : list of 3-tuples or 4-tuples.
+        Each tuple is for a single datapoint, consisting of
+        a SMILES, a DGLGraph, all-task labels and optionally
+        a binary mask indicating the existence of labels.
+    Returns
+    -------
+    smiles : list
+        List of smiles
+    bg : BatchedDGLGraph
+        Batched DGLGraphs
+    labels : Tensor of dtype float32 and shape (B, T)
+        Batched datapoint labels. B is len(data) and
+        T is the number of total tasks.
+    masks : Tensor of dtype float32 and shape (B, T)
+        Batched datapoint binary mask, indicating the
+        existence of labels. If binary masks are not
+        provided, return a tensor with ones.
+    """
+    assert len(data[0]) in [3, 4], \
+        'Expect the tuple to be of length 3 or 4, got {:d}'.format(len(data[0]))
+    if len(data[0]) == 3:
+        smiles, graphs, labels = map(list, zip(*data))
+        masks = None
+    else:
+        smiles, graphs, labels, masks = map(list, zip(*data))
+
+    bg = dgl.batch(graphs)
+    bg.set_n_initializer(dgl.init.zero_initializer)
+    bg.set_e_initializer(dgl.init.zero_initializer)
+    labels = torch.stack(labels, dim=0)
+
+    if masks is None:
+        masks = torch.ones(labels.shape)
+    else:
+        masks = torch.stack(masks, dim=0)
+    return smiles, bg, labels, masks
+
+
+class Meter(object):
+    """Track and summarize model performance on a dataset for
+    (multi-label) binary classification."""
+
+    def __init__(self):
+        self.mask = []
+        self.y_pred = []
+        self.y_true = []
+
+    def update(self, y_pred, y_true, mask):
+        """Update for the result of an iteration
+        Parameters
+        ----------
+        y_pred : float32 tensor
+            Predicted molecule labels with shape (B, T),
+            B for batch size and T for the number of tasks
+        y_true : float32 tensor
+            Ground truth molecule labels with shape (B, T)
+        mask : float32 tensor
+            Mask for indicating the existence of ground
+            truth labels with shape (B, T)
+        """
+        self.y_pred.append(y_pred.detach().cpu())
+        self.y_true.append(y_true.detach().cpu())
+        self.mask.append(mask.detach().cpu())
+
+    def roc_auc_score(self):
+        """Compute roc-auc score for each task.
+        Returns
+        -------
+        list of float
+            roc-auc score for all tasks
+        """
+        mask = torch.cat(self.mask, dim=0)
+        y_pred = torch.cat(self.y_pred, dim=0)
+        y_true = torch.cat(self.y_true, dim=0)
+        # Todo: support categorical classes
+        # This assumes binary case only
+        y_pred = torch.sigmoid(y_pred)
+        n_tasks = y_true.shape[1]
+        scores = []
+        for task in range(n_tasks):
+            task_w = mask[:, task]
+            task_y_true = y_true[:, task][task_w != 0].numpy()
+            task_y_pred = y_pred[:, task][task_w != 0].numpy()
+            scores.append(roc_auc_score(task_y_true, task_y_pred))
+        return scores
+
+    def l1_loss(self, reduction):
+        """Compute l1 loss for each task.
+        Returns
+        -------
+        list of float
+            l1 loss for all tasks
+        reduction : str
+            * 'mean': average the metric over all labeled data points for each task
+            * 'sum': sum the metric over all labeled data points for each task
+        """
+        mask = torch.cat(self.mask, dim=0)
+        y_pred = torch.cat(self.y_pred, dim=0)
+        y_true = torch.cat(self.y_true, dim=0)
+        n_tasks = y_true.shape[1]
+        scores = []
+        for task in range(n_tasks):
+            task_w = mask[:, task]
+            task_y_true = y_true[:, task][task_w != 0]
+            task_y_pred = y_pred[:, task][task_w != 0]
+            scores.append(F.l1_loss(task_y_true, task_y_pred, reduction=reduction).item())
+        return scores
+
+    def rmse(self):
+        """Compute RMSE for each task.
+        Returns
+        -------
+        list of float
+            rmse for all tasks
+        """
+        mask = torch.cat(self.mask, dim=0)
+        y_pred = torch.cat(self.y_pred, dim=0)
+        y_true = torch.cat(self.y_true, dim=0)
+        n_data, n_tasks = y_true.shape
+        scores = []
+        for task in range(n_tasks):
+            task_w = mask[:, task]
+            task_y_true = y_true[:, task][task_w != 0]
+            task_y_pred = y_pred[:, task][task_w != 0]
+            scores.append(np.sqrt(F.mse_loss(task_y_pred, task_y_true).cpu().item()))
+        return scores
+
+    def compute_metric(self, metric_name, reduction='mean'):
+        """Compute metric for each task.
+        Parameters
+        ----------
+        metric_name : str
+            Name for the metric to compute.
+        reduction : str
+            Only comes into effect when the metric_name is l1_loss.
+            * 'mean': average the metric over all labeled data points for each task
+            * 'sum': sum the metric over all labeled data points for each task
+        Returns
+        -------
+        list of float
+            Metric value for each task
+        """
+        assert metric_name in ['roc_auc', 'l1', 'rmse'], \
+            'Expect metric name to be "roc_auc", "l1" or "rmse", got {}'.format(metric_name)
+        assert reduction in ['mean', 'sum']
+        if metric_name == 'roc_auc':
+            return self.roc_auc_score()
+        if metric_name == 'l1':
+            return self.l1_loss(reduction)
+        if metric_name == 'rmse':
+            return self.rmse()
+
+
+def main(args):
+    # Download Data
+    if args.dev_mode.lower() == 'true':
+        df = pd.read_csv(os.path.join(args.data_dir, 'dev_HIV.csv'))
+    else:
+        df = pd.read_csv(os.path.join(args.data_dir, 'HIV.csv'))
+    print(f'Num data points: {len(df)}')
+
+    # Format Data for Ingestion Into Pytorch Dataloader
+    data = df.to_records(index=False)  # creates tuple with format (smiles, activity, label)
+    data = [(s, a, l, smiles_to_dgl_graph(s)) for s, a, l in tqdm(data, total=len(data))]  # tuple with format (smiles, activity, label, dgl.graph)
+    data = [(s, g, torch.tensor([l], dtype=torch.float)) for s, a, l, g in tqdm(data, total=len(data))]  # add feature tensor to dataset
+
+    # Create Model
+    in_feats = 74
+    gcn_hidden_feats = [64, 64]
+    classifier_hidden_feats = 64
+    n_tasks = 1  # n_tasks is the number of output features (12 for Tox21, 1 for HIV dataset)
+    batch_size = 200
+    atom_data_field = 'h'
+    loss_criterion = BCEWithLogitsLoss()
+    learning_rate = 0.0001
+    metric_name = 'roc_auc'
+
+    model = GCNClassifier(in_feats=in_feats,
+                      gcn_hidden_feats=gcn_hidden_feats,
+                      classifier_hidden_feats=classifier_hidden_feats,
+                      n_tasks=n_tasks)
+
+    # split data
+    train,test,val = split_dataset(data, frac_list=None, shuffle=True, random_state=None)
+    train_loader = DataLoader(train, batch_size=batch_size, collate_fn=collate_molgraphs)
+    test_loader = DataLoader(test, batch_size=batch_size, collate_fn=collate_molgraphs)
+    
+    # Train The Model
+    # train across several epochs
+    epochs = 200
+    for e in range(epochs):
+        # Train the model on batch of data
+
+        for batch_id, batch_data in enumerate(train_loader):
+            smiles, bg, labels, masks = batch_data
+            atom_feats = bg.ndata.pop(atom_data_field)
+            logits = model(bg, atom_feats)
+            loss = (loss_criterion(logits, labels) * (masks != 0).float()).mean()
+            optimizer = Adam(model.parameters(), lr=learning_rate)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+    
+    # Eval the model on test set
+        eval_meter = Meter()
+        with torch.no_grad():
+            for batch_id, batch_data in enumerate(test_loader):
+                smiles, bg, labels, masks = batch_data
+                atom_feats = bg.ndata.pop(atom_data_field)
+    #             atom_feats, labels = atom_feats.to(args['device']), labels.to(args['device'])
+                logits = model(bg, atom_feats)
+                eval_meter.update(logits, labels, masks)
+    
+    
+        test_score = np.mean(eval_meter.compute_metric(metric_name))
+    
+        print(f'epoch:{e}, train_loss:{loss:.4f}, test_score:{test_score}')
+        
+    # Save the model
+    torch.save(model, os.path.join(args.model_dir, 'gnn_model.pt'))
+
+    print('Done Training!')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dev-mode', type=str, default='False')
+
+    # The parameters below retrieve their default values from SageMaker environment variables, which are
+    # instantiated by the SageMaker containers framework.
+    # https://github.com/aws/sagemaker-containers#how-a-script-is-executed-inside-the-container
+    parser.add_argument('--hosts', type=str, default=ast.literal_eval(os.environ['SM_HOSTS']))
+    parser.add_argument('--current-host', type=str, default=os.environ['SM_CURRENT_HOST'])
+    parser.add_argument('--model-dir', type=str, default=os.environ['SM_MODEL_DIR'])
+    parser.add_argument('--data-dir', type=str, default=os.environ['SM_CHANNEL_TRAINING'])
+    parser.add_argument('--num-gpus', type=int, default=os.environ['SM_NUM_GPUS'])
+
+    args = parser.parse_args()
+
+    main(args)
+
+
+
