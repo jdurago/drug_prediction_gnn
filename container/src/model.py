@@ -38,7 +38,10 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 def collate_molgraphs(data):
-    """Batching a list of datapoints for dataloader.
+    """
+    Referenced from: https://github.com/dmlc/dgl/blob/master/examples/pytorch/model_zoo/chem/property_prediction/utils.py
+
+    Batching a list of datapoints for dataloader.
     Parameters
     ----------
     data : list of 3-tuples or 4-tuples.
@@ -80,7 +83,10 @@ def collate_molgraphs(data):
 
 
 class Meter(object):
-    """Track and summarize model performance on a dataset for
+    """
+    Referenced from: https://github.com/dmlc/dgl/blob/master/examples/pytorch/model_zoo/chem/property_prediction/utils.py
+
+    Track and summarize model performance on a dataset for
     (multi-label) binary classification."""
 
     def __init__(self):
@@ -203,7 +209,7 @@ def generate_confusion_matrix_plot(y_true, logits) -> matplotlib.figure.Figure:
     ax.set_xlabel('Predicted labels');ax.set_ylabel('True labels'); 
     ax.set_title('Confusion Matrix'); 
     
-    return fig
+    return fig, cm
 
 def generate_auc_roc_plot(y_true, logits) -> matplotlib.figure.Figure:
     ## Generate ROC-AUC Curve based on validation set
@@ -219,7 +225,7 @@ def generate_auc_roc_plot(y_true, logits) -> matplotlib.figure.Figure:
             fontsize=10)
     plt.suptitle('Validation AUC-ROC Curve')
     
-    return fig
+    return fig, auc
 
 def generate_precision_recall_plot(y_true, logits) -> matplotlib.figure.Figure:
     fig, ax = plt.subplots(1)
@@ -236,7 +242,7 @@ def generate_precision_recall_plot(y_true, logits) -> matplotlib.figure.Figure:
             fontsize=10)
     plt.suptitle('Validation Precision-Recall Curve')
     
-    return fig
+    return fig, f1_val
 
 def main(args):
     # Download Data
@@ -264,17 +270,6 @@ def main(args):
     metric_name = args.metric_name
     epochs = args.epochs
     
-    # in_feats = 74
-    # gcn_hidden_feats = [64, 64]
-    # classifier_hidden_feats = 64
-    # n_tasks = 1  # n_tasks is the number of output features (12 for Tox21, 1 for HIV dataset)
-    # batch_size = 200
-    # atom_data_field = 'h'
-    # loss_criterion = BCEWithLogitsLoss()
-    # learning_rate = 0.0001
-    # metric_name = 'roc_auc'
-    # epochs = 200
-
     model = GCNClassifier(in_feats=in_feats,
                       gcn_hidden_feats=gcn_hidden_feats,
                       classifier_hidden_feats=classifier_hidden_feats,
@@ -328,15 +323,16 @@ def main(args):
         atom_feats = bg.ndata.pop(atom_data_field)
         logits = model(bg, atom_feats)
 
-    cm = generate_confusion_matrix_plot(labels, logits)
-    cm.savefig(os.path.join(args.model_dir, 'confusion_matrix.png'))
+    cm_fig, _ = generate_confusion_matrix_plot(labels, logits)
+    cm_fig.savefig(os.path.join(args.model_dir, 'confusion_matrix.png'))
 
-    auc_roc = generate_auc_roc_plot(labels, logits)
-    auc_roc.savefig(os.path.join(args.model_dir, 'auc_roc_validation.png') )
+    auc_roc_fig, auc_roc = generate_auc_roc_plot(labels, logits)
+    auc_roc_fig.savefig(os.path.join(args.model_dir, 'auc_roc_validation.png') )
 
-    rp_curve = generate_precision_recall_plot(labels, logits)
-    rp_curve.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
+    rp_curve_fig, f1_score = generate_precision_recall_plot(labels, logits)
+    rp_curve_fig.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
 
+    print(f'auc_roc: {auc_roc}, f1_score: {f1_score}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
