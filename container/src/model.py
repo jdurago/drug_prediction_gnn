@@ -30,6 +30,12 @@ from sklearn.metrics import roc_auc_score
 from utils import smiles_to_dgl_graph
 from tqdm import tqdm
 
+import matplotlib
+from sklearn.metrics import roc_curve, roc_auc_score, f1_score, confusion_matrix, precision_recall_curve, f1_score
+import seaborn as sns
+from sklearn.metrics import roc_curve
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
 
 def collate_molgraphs(data):
     """Batching a list of datapoints for dataloader.
@@ -187,14 +193,59 @@ class Meter(object):
         if metric_name == 'rmse':
             return self.rmse()
 
+def generate_confusion_matrix_plot(y_true, logits) -> matplotlib.figure.Figure:
+    fig = plt.figure()
+    ax= plt.subplot()
+    y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
+    cm = confusion_matrix(y_true, y_pred)
+    hm = sns.heatmap(cm, annot=True, ax = ax, fmt='g')
+    # labels, title and ticks
+    ax.set_xlabel('Predicted labels');ax.set_ylabel('True labels'); 
+    ax.set_title('Confusion Matrix'); 
+    
+    return fig
+
+def generate_auc_roc_plot(y_true, logits) -> matplotlib.figure.Figure:
+    ## Generate ROC-AUC Curve based on validation set
+    fig, ax = plt.subplots(1)
+    tpr, fpr, _ = roc_curve(y_true, logits.detach().numpy())
+    auc = roc_auc_score(y_true, logits.detach().numpy())
+    plt.plot(tpr, fpr)
+    ax.get_xaxis().set_visible(True)
+    ax.get_yaxis().set_visible(True)
+    ax.text(0.95, 0.01, u"%0.2f" % auc,
+            verticalalignment='bottom', horizontalalignment='right',
+            transform=ax.transAxes, weight='bold',
+            fontsize=10)
+    plt.suptitle('Validation AUC-ROC Curve')
+    
+    return fig
+
+def generate_precision_recall_plot(y_true, logits) -> matplotlib.figure.Figure:
+    fig, ax = plt.subplots(1)
+    proba = logits.detach().numpy()
+    pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
+    precision, recall, _ = precision_recall_curve(y_true, proba)
+    f1_val = f1_score(y_true, pred)
+    plt.plot(recall, precision)
+    ax.get_xaxis().set_visible(True)
+    ax.get_yaxis().set_visible(True)
+    ax.text(0.95, 0.01, u"%0.2f" % f1_val,
+            verticalalignment='bottom', horizontalalignment='right',
+            transform=ax.transAxes, weight='bold',
+            fontsize=10)
+    plt.suptitle('Validation Precision-Recall Curve')
+    
+    return fig
 
 def main(args):
     # Download Data
     if args.dev_mode.lower() == 'true':
         df = pd.read_csv(os.path.join(args.data_dir, 'dev_HIV.csv'))
     else:
-        df = pd.read_csv(os.path.join(args.data_dir, 'HIV.csv'))
+        df = pd.read_csv(os.path.join(args.data_dir, 'HIV.csv')) 
     print(f'Num data points: {len(df)}')
+    y = df['HIV_active'].tolist() # get labels for stratified splitting of train/test/split sets
 
     # Format Data for Ingestion Into Pytorch Dataloader
     data = df.to_records(index=False)  # creates tuple with format (smiles, activity, label)
@@ -202,29 +253,41 @@ def main(args):
     data = [(s, g, torch.tensor([l], dtype=torch.float)) for s, a, l, g in tqdm(data, total=len(data))]  # add feature tensor to dataset
 
     # Create Model
-    in_feats = 74
-    gcn_hidden_feats = [64, 64]
-    classifier_hidden_feats = 64
-    n_tasks = 1  # n_tasks is the number of output features (12 for Tox21, 1 for HIV dataset)
-    batch_size = 200
-    atom_data_field = 'h'
+    in_feats = args.in_feats
+    gcn_hidden_feats = [args.gcn_hidden_feats] * args.num_hidden_layers # number of hidden layers and features for each layer. Format is -> list[int, int, ...]
+    classifier_hidden_feats = args.classifier_hidden_feats
+    n_tasks = args.n_tasks # n_tasks is the number of output features (12 for Tox21, 1 for HIV dataset)
+    batch_size = args.batch_size
+    atom_data_field = args.atom_data_field
     loss_criterion = BCEWithLogitsLoss()
-    learning_rate = 0.0001
-    metric_name = 'roc_auc'
+    learning_rate = args.learning_rate 
+    metric_name = args.metric_name
+    epochs = args.epochs
+    
+    # in_feats = 74
+    # gcn_hidden_feats = [64, 64]
+    # classifier_hidden_feats = 64
+    # n_tasks = 1  # n_tasks is the number of output features (12 for Tox21, 1 for HIV dataset)
+    # batch_size = 200
+    # atom_data_field = 'h'
+    # loss_criterion = BCEWithLogitsLoss()
+    # learning_rate = 0.0001
+    # metric_name = 'roc_auc'
+    # epochs = 200
 
     model = GCNClassifier(in_feats=in_feats,
                       gcn_hidden_feats=gcn_hidden_feats,
                       classifier_hidden_feats=classifier_hidden_feats,
                       n_tasks=n_tasks)
 
-    # split data
-    train,test,val = split_dataset(data, frac_list=None, shuffle=True, random_state=None)
+    # Generate train/test/val data sets
+    train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1) # split data into train and test
+    train, val, y_train, y_val = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.11) # further split train into train validation
     train_loader = DataLoader(train, batch_size=batch_size, collate_fn=collate_molgraphs)
     test_loader = DataLoader(test, batch_size=batch_size, collate_fn=collate_molgraphs)
-    
+    val_loader = DataLoader(val, batch_size=len(val), collate_fn=collate_molgraphs)
+
     # Train The Model
-    # train across several epochs
-    epochs = 200
     for e in range(epochs):
         # Train the model on batch of data
 
@@ -238,7 +301,7 @@ def main(args):
             loss.backward()
             optimizer.step()
     
-    # Eval the model on test set
+        # Eval the model on test set
         eval_meter = Meter()
         with torch.no_grad():
             for batch_id, batch_data in enumerate(test_loader):
@@ -247,22 +310,48 @@ def main(args):
     #             atom_feats, labels = atom_feats.to(args['device']), labels.to(args['device'])
                 logits = model(bg, atom_feats)
                 eval_meter.update(logits, labels, masks)
-    
-    
-        test_score = np.mean(eval_meter.compute_metric(metric_name))
-    
-        print(f'epoch:{e}, train_loss:{loss:.4f}, test_score:{test_score}')
         
+        test_score = np.mean(eval_meter.compute_metric(metric_name))
+        print(f'epoch:{e}, train_loss:{loss:.4f}, test_score:{test_score}')
+
+    print('Done Training!')
+    
     # Save the model
     torch.save(model, os.path.join(args.model_dir, 'gnn_model.pt'))
 
-    print('Done Training!')
+    # Score the model based on validation data
+    val_meter = Meter()
+    val_loader = DataLoader(val, batch_size=len(val), collate_fn=collate_molgraphs)
+    
+    for i, batch_data in enumerate(val_loader):
+        smiles, bg, labels, masks = batch_data
+        atom_feats = bg.ndata.pop(atom_data_field)
+        logits = model(bg, atom_feats)
+
+    cm = generate_confusion_matrix_plot(labels, logits)
+    cm.savefig(os.path.join(args.model_dir, 'confusion_matrix.png'))
+
+    auc_roc = generate_auc_roc_plot(labels, logits)
+    auc_roc.savefig(os.path.join(args.model_dir, 'auc_roc_validation.png') )
+
+    rp_curve = generate_precision_recall_plot(labels, logits)
+    rp_curve.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dev-mode', type=str, default='False')
-
+    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--learning-rate', type=float, default=1e-4)
+    parser.add_argument('--in-feats', type=int, default=74)
+    parser.add_argument('--gcn-hidden-feats', type=int, default=64)
+    parser.add_argument('--classifier-hidden-feats', type=int, default=64)
+    parser.add_argument('--n-tasks', type=int, default=1)
+    parser.add_argument('--batch-size', type=int, default=200)
+    parser.add_argument('--atom-data-field', type=str, default='h')
+    parser.add_argument('--metric-name', type=str, default='roc_auc')
+    parser.add_argument('--num-hidden-layers', type=int, default=2) 
+    
     # The parameters below retrieve their default values from SageMaker environment variables, which are
     # instantiated by the SageMaker containers framework.
     # https://github.com/aws/sagemaker-containers#how-a-script-is-executed-inside-the-container
@@ -275,6 +364,3 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     main(args)
-
-
-

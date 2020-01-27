@@ -31,7 +31,7 @@ RUN conda install pytorch-cpu torchvision -y -c pytorch
 RUN pip install sagemaker-containers
 RUN conda install -y -c conda-forge matplotlib
 #RUN pip install git+https://github.com/samoturk/mol2vec
-RUN pip install scikit-learn==0.21.3 dgl==0.4.1
+RUN pip install scikit-learn==0.21.3 dgl==0.4.1 seaborn
 
 ENV PATH="/opt/ml/code:${PATH}"
 
