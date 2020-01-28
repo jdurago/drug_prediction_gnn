@@ -360,4 +360,5 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    if args.random_state == -1: args.random_state = None
     main(args)
