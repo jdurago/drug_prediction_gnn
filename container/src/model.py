@@ -276,7 +276,7 @@ def main(args):
                       n_tasks=n_tasks)
 
     # Generate train/test/val data sets
-    train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1) # split data into train and test
+    train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1, random_state=args.random_state) # split data into train and test
     train, val, y_train, y_val = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.11) # further split train into train validation
     train_loader = DataLoader(train, batch_size=batch_size, collate_fn=collate_molgraphs)
     test_loader = DataLoader(test, batch_size=batch_size, collate_fn=collate_molgraphs)
@@ -339,14 +339,15 @@ if __name__ == '__main__':
     parser.add_argument('--dev-mode', type=str, default='False')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--learning-rate', type=float, default=1e-4)
-    parser.add_argument('--in-feats', type=int, default=74)
+    parser.add_argument('--in-feats', type=int, default=74, help='num features per node (default: 74 for chemistry data)')
     parser.add_argument('--gcn-hidden-feats', type=int, default=64)
     parser.add_argument('--classifier-hidden-feats', type=int, default=64)
-    parser.add_argument('--n-tasks', type=int, default=1)
+    parser.add_argument('--n-tasks', type=int, default=1, help='output size of classification layer')
     parser.add_argument('--batch-size', type=int, default=200)
     parser.add_argument('--atom-data-field', type=str, default='h')
     parser.add_argument('--metric-name', type=str, default='roc_auc')
     parser.add_argument('--num-hidden-layers', type=int, default=2) 
+    parser.add_argument('--random-state', type=int, default=-1, help='random state for train/test/split dataset. If -1 then defaults to RandomState') 
     
     # The parameters below retrieve their default values from SageMaker environment variables, which are
     # instantiated by the SageMaker containers framework.
