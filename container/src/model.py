@@ -199,7 +199,7 @@ class Meter(object):
         if metric_name == 'rmse':
             return self.rmse()
 
-def generate_confusion_matrix_plot(y_true, logits) -> matplotlib.figure.Figure:
+def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     fig = plt.figure()
     ax= plt.subplot()
     y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
@@ -211,7 +211,7 @@ def generate_confusion_matrix_plot(y_true, logits) -> matplotlib.figure.Figure:
     
     return fig, cm
 
-def generate_auc_roc_plot(y_true, logits) -> matplotlib.figure.Figure:
+def generate_auc_roc_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     ## Generate ROC-AUC Curve based on validation set
     fig, ax = plt.subplots(1)
     tpr, fpr, _ = roc_curve(y_true, logits.detach().numpy())
@@ -227,7 +227,7 @@ def generate_auc_roc_plot(y_true, logits) -> matplotlib.figure.Figure:
     
     return fig, auc
 
-def generate_precision_recall_plot(y_true, logits) -> matplotlib.figure.Figure:
+def generate_precision_recall_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     fig, ax = plt.subplots(1)
     proba = logits.detach().numpy()
     pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
