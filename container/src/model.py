@@ -332,7 +332,7 @@ def main(args):
     rp_curve_fig, f1_score = generate_precision_recall_plot(labels, logits)
     rp_curve_fig.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
 
-    print(f'auc_roc: {auc_roc}, f1_score: {f1_score}')
+    print(f'auc_roc:{auc_roc}, f1_score:{f1_score}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
