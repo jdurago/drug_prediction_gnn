@@ -27,7 +27,7 @@ from torch.nn import BCEWithLogitsLoss
 from torch.optim import Adam
 
 from sklearn.metrics import roc_auc_score
-from utils import smiles_to_dgl_graph
+from utils import smiles_to_dgl_graph, logit2probability
 from tqdm import tqdm
 
 import matplotlib
@@ -202,7 +202,8 @@ class Meter(object):
 def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     fig = plt.figure()
     ax= plt.subplot()
-    y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
+    # y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
+    y_pred = torch.round(logit2probability(logits)).detach().numpy()
     cm = confusion_matrix(y_true, y_pred)
     hm = sns.heatmap(cm, annot=True, ax = ax, fmt='g')
     # labels, title and ticks
@@ -214,8 +215,11 @@ def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (m
 def generate_auc_roc_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     ## Generate ROC-AUC Curve based on validation set
     fig, ax = plt.subplots(1)
-    tpr, fpr, _ = roc_curve(y_true, logits.detach().numpy())
-    auc = roc_auc_score(y_true, logits.detach().numpy())
+    y_prob = logit2probability(logits).detach().numpy()
+    # tpr, fpr, _ = roc_curve(y_true, logits.detach().numpy())
+    tpr, fpr, _ = roc_curve(y_true, y_prob)
+    # auc = roc_auc_score(y_true, logits.detach().numpy())
+    auc = roc_auc_score(y_true, y_prob)
     plt.plot(tpr, fpr)
     ax.get_xaxis().set_visible(True)
     ax.get_yaxis().set_visible(True)
@@ -229,9 +233,11 @@ def generate_auc_roc_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib
 
 def generate_precision_recall_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     fig, ax = plt.subplots(1)
-    proba = logits.detach().numpy()
-    pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
-    precision, recall, _ = precision_recall_curve(y_true, proba)
+    # proba = logits.detach().numpy()
+    proba = logit2probability(logits)
+    # pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
+    pred = torch.round(proba).detach().numpy()
+    precision, recall, _ = precision_recall_curve(y_true, proba.detach().numpy())
     f1_val = f1_score(y_true, pred)
     plt.plot(recall, precision)
     ax.get_xaxis().set_visible(True)
