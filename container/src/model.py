@@ -19,7 +19,7 @@ import pandas as pd
 import torch
 
 import dgl
-from dgl.model_zoo.chem import GCNClassifier
+from dgl.model_zoo.chem import GCNClassifier, GATClassifier
 from dgl.data.utils import split_dataset
 
 from torch.utils.data import DataLoader
@@ -266,14 +266,27 @@ def main(args):
     batch_size = args.batch_size
     atom_data_field = args.atom_data_field
     loss_criterion = BCEWithLogitsLoss()
-    learning_rate = args.learning_rate 
+    learning_rate = args.learning_rate
     metric_name = args.metric_name
     epochs = args.epochs
-    
-    model = GCNClassifier(in_feats=in_feats,
-                      gcn_hidden_feats=gcn_hidden_feats,
-                      classifier_hidden_feats=classifier_hidden_feats,
-                      n_tasks=n_tasks)
+
+    gat_hidden_feats = [args.gat_hidden_feats] * args.num_hidden_layers # number of hidden layers and features for each layer. Format is -> list[int, int, ...]
+    num_heads = [args.head_output_size] * args.num_head_layers
+
+    if args.net_type == 'GCN':
+        print('Using Graph Convolutional Net')
+        model = GCNClassifier(in_feats=in_feats,
+                          gcn_hidden_feats=gcn_hidden_feats,
+                          classifier_hidden_feats=classifier_hidden_feats,
+                          n_tasks=n_tasks)
+
+    elif args.net_type == 'GAT':
+        print('Using Graph Attention Net')
+        model = GATClassifier(in_feats=in_feats,
+                                gat_hidden_feats=gat_hidden_feats,
+                                classifier_hidden_feats=classifier_hidden_feats,
+                                num_heads = num_heads,
+                                n_tasks=n_tasks)
 
     # Generate train/test/val data sets
     train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1, random_state=args.random_state) # split data into train and test
@@ -337,16 +350,20 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dev-mode', type=str, default='False')
+    parser.add_argument('--net-type', type=str, default='GCN', help='GCN: Graph Convolutional Net; GAT: Graph Attention Net (Default-> GCN)')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--learning-rate', type=float, default=1e-4)
     parser.add_argument('--in-feats', type=int, default=74, help='num features per node (default: 74 for chemistry data)')
     parser.add_argument('--gcn-hidden-feats', type=int, default=64)
+    parser.add_argument('--gat-hidden-feats', type=int, default=32)
+    parser.add_argument('--num-hidden-layers', type=int, default=2)
+    parser.add_argument('--num-head-layers', type=int, default=2, help='Number of GAT head layers')
+    parser.add_argument('--head-output-size', type=int, default=4, help='Output size of each attention layer')
     parser.add_argument('--classifier-hidden-feats', type=int, default=64)
     parser.add_argument('--n-tasks', type=int, default=1, help='output size of classification layer')
     parser.add_argument('--batch-size', type=int, default=200)
     parser.add_argument('--atom-data-field', type=str, default='h')
     parser.add_argument('--metric-name', type=str, default='roc_auc')
-    parser.add_argument('--num-hidden-layers', type=int, default=2) 
     parser.add_argument('--random-state', type=int, default=-1, help='random state for train/test/split dataset. If -1 then defaults to RandomState') 
     
     # The parameters below retrieve their default values from SageMaker environment variables, which are
