@@ -39,7 +39,7 @@ Steps for running a training job are as follows:
     estimator = Estimator(role=role,
                           train_instance_count=1,
                           train_instance_type=instance_type,
-                          image_name='drug-prediction-gcn:latest',
+                          image_name='drug-prediction-gnn:latest',
                           hyperparameters=hyperparameters)
 
     estimator.fit(<PATH TO LOCAL DATA>)
