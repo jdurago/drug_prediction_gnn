@@ -257,6 +257,9 @@ def generate_precision_recall_plot(y_true: np.array, logits: torch.Tensor) -> (m
     return fig, f1_val
 
 def main(args):
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    setattr(args, 'device', device)
+
     # Download Data
     if args.dev_mode.lower() == 'true':
         df = pd.read_csv(os.path.join(args.data_dir, 'dev_HIV.csv'))
@@ -299,6 +302,7 @@ def main(args):
                                 classifier_hidden_feats=classifier_hidden_feats,
                                 num_heads = num_heads,
                                 n_tasks=n_tasks)
+    model.to(args.device)
 
     # Generate train/test/val data sets
     train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1, random_state=args.random_state) # split data into train and test
@@ -314,6 +318,7 @@ def main(args):
         for batch_id, batch_data in enumerate(train_loader):
             smiles, bg, labels, masks = batch_data
             atom_feats = bg.ndata.pop(atom_data_field)
+            atom_feats, labels, masks = atom_feats.to(args.device), labels.to(args.device), masks.to(args.device)
             logits = model(bg, atom_feats)
             loss = (loss_criterion(logits, labels) * (masks != 0).float()).mean()
             optimizer = Adam(model.parameters(), lr=learning_rate)
@@ -327,7 +332,7 @@ def main(args):
             for batch_id, batch_data in enumerate(test_loader):
                 smiles, bg, labels, masks = batch_data
                 atom_feats = bg.ndata.pop(atom_data_field)
-    #             atom_feats, labels = atom_feats.to(args['device']), labels.to(args['device'])
+                atom_feats, labels, masks = atom_feats.to(args.device), labels.to(args.device), masks.to(args.device)
                 logits = model(bg, atom_feats)
                 eval_meter.update(logits, labels, masks)
         
