@@ -1,12 +1,12 @@
 # Drug Prediction
-Implementation of graph neural network for the [HIV MoleculeNet dataset](http://moleculenet.ai/datasets-1). This package is meant to be run as an AWS Sagemaker training job.
+Implementation of graph neural networks for the [HIV MoleculeNet dataset](http://moleculenet.ai/datasets-1). This package is meant to be run as an AWS Sagemaker training job.
 
 # Build Model and Train
 Sagemaker training jobs utilize docker containers stored in AWS Elastic Container Registry to execute. Code for running a local and container based training jobs can be found in the <b> run_container.ipynb </b>
 
 Steps for running a training job are as follows:
 1. Build container and upload to AWS ECR using the build_and_push.sh script <br />
-    `!cd container; ./build_and_push.sh drug-prediction-gcn`
+    `!cd container; ./build_and_push.sh drug-prediction-gnn`
 2. To run a local training job <br />
 
     <b>Download Datasets:</b> <br />
@@ -59,7 +59,7 @@ Steps for running a training job are as follows:
 
     my_session = boto3.session.Session()
     region = my_session.region_name
-    algorithm_name = 'drug-prediction-gcn'
+    algorithm_name = 'drug-prediction-gnn'
     ecr_image = '{}.dkr.ecr.{}.amazonaws.com/{}:latest'.format(account, region, algorithm_name)
     print(ecr_image)
     
