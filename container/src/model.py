@@ -204,7 +204,13 @@ def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (m
     ax= plt.subplot()
     # y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
     y_pred = torch.round(logit2probability(logits)).detach().numpy()
-    cm = confusion_matrix(y_true, y_pred)
+    try:
+        cm = confusion_matrix(y_true, y_pred)
+    except ValueError:
+        print('ERROR: Input contains NaN, infinity or a value too large for dtype float32')
+        print('logits:')
+        print(logits)
+        print(f'len(logits): {len(logits)}')
     hm = sns.heatmap(cm, annot=True, ax = ax, fmt='g')
     # labels, title and ticks
     ax.set_xlabel('Predicted labels');ax.set_ylabel('True labels'); 
@@ -276,7 +282,7 @@ def main(args):
     metric_name = args.metric_name
     epochs = args.epochs
 
-    gat_hidden_feats = [args.gat_hidden_feats] * args.num_hidden_layers # number of hidden layers and features for each layer. Format is -> list[int, int, ...]
+    gat_hidden_feats = [args.gat_hidden_feats] * args.num_head_layers # number of hidden layers and features for each layer. Format is -> list[int, int, ...]
     num_heads = [args.head_output_size] * args.num_head_layers
 
     if args.net_type == 'GCN':
@@ -344,13 +350,21 @@ def main(args):
 
     cm_fig, _ = generate_confusion_matrix_plot(labels, logits)
     cm_fig.savefig(os.path.join(args.model_dir, 'confusion_matrix.png'))
-
-    auc_roc_fig, auc_roc = generate_auc_roc_plot(labels, logits)
-    auc_roc_fig.savefig(os.path.join(args.model_dir, 'auc_roc_validation.png') )
-
-    rp_curve_fig, f1_score = generate_precision_recall_plot(labels, logits)
-    rp_curve_fig.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
-
+    
+    try:
+        auc_roc_fig, auc_roc = generate_auc_roc_plot(labels, logits)
+        auc_roc_fig.savefig(os.path.join(args.model_dir, 'auc_roc_validation.png') )
+    except ValueError:
+        auc_roc = None
+        print('ERROR: Failed creating auc_roc plot')
+    
+    try:
+        rp_curve_fig, f1_score = generate_precision_recall_plot(labels, logits)
+        rp_curve_fig.savefig(os.path.join(args.model_dir, 'recall_precision_validation.png'))
+    except ValueError:
+        f1_score = None
+        print('ERROR: Failed creating recall precision plot')
+        
     print(f'auc_roc:{auc_roc}, f1_score:{f1_score}')
 
 if __name__ == '__main__':
