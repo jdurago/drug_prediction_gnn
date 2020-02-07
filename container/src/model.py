@@ -208,9 +208,12 @@ def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (m
         cm = confusion_matrix(y_true, y_pred)
     except ValueError:
         print('ERROR: Input contains NaN, infinity or a value too large for dtype float32')
-        print('logits:')
-        print(logits)
         print(f'len(logits): {len(logits)}')
+        with np.printoptions(threshold=np.inf):
+            print('YTRUE')
+            print(y_true)
+            print('YPRED')
+            print(y_pred)
     hm = sns.heatmap(cm, annot=True, ax = ax, fmt='g')
     # labels, title and ticks
     ax.set_xlabel('Predicted labels');ax.set_ylabel('True labels'); 
@@ -259,6 +262,7 @@ def generate_precision_recall_plot(y_true: np.array, logits: torch.Tensor) -> (m
 def main(args):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     setattr(args, 'device', device)
+    print(f'Using the following device type: {args.device}')
 
     # Download Data
     if args.dev_mode.lower() == 'true':
@@ -302,7 +306,7 @@ def main(args):
                                 classifier_hidden_feats=classifier_hidden_feats,
                                 num_heads = num_heads,
                                 n_tasks=n_tasks)
-    model.to(args.device)
+    model.to(device)
 
     # Generate train/test/val data sets
     train, test, y_train, y_test = train_test_split(data,y, shuffle=True, stratify=y, test_size=0.1, random_state=args.random_state) # split data into train and test
@@ -318,7 +322,7 @@ def main(args):
         for batch_id, batch_data in enumerate(train_loader):
             smiles, bg, labels, masks = batch_data
             atom_feats = bg.ndata.pop(atom_data_field)
-            atom_feats, labels, masks = atom_feats.to(args.device), labels.to(args.device), masks.to(args.device)
+            atom_feats, labels, masks = atom_feats.to(device), labels.to(device), masks.to(device)
             logits = model(bg, atom_feats)
             loss = (loss_criterion(logits, labels) * (masks != 0).float()).mean()
             optimizer = Adam(model.parameters(), lr=learning_rate)
@@ -332,7 +336,7 @@ def main(args):
             for batch_id, batch_data in enumerate(test_loader):
                 smiles, bg, labels, masks = batch_data
                 atom_feats = bg.ndata.pop(atom_data_field)
-                atom_feats, labels, masks = atom_feats.to(args.device), labels.to(args.device), masks.to(args.device)
+                atom_feats, labels, masks = atom_feats.to(device), labels.to(device), masks.to(device)
                 logits = model(bg, atom_feats)
                 eval_meter.update(logits, labels, masks)
         
@@ -351,7 +355,10 @@ def main(args):
     for i, batch_data in enumerate(val_loader):
         smiles, bg, labels, masks = batch_data
         atom_feats = bg.ndata.pop(atom_data_field)
-        logits = model(bg, atom_feats)
+        logits = model(bg, atom_feats.to(device))
+
+    if torch.cuda.is_available():
+        logits = logits.cpu()
 
     cm_fig, _ = generate_confusion_matrix_plot(labels, logits)
     cm_fig.savefig(os.path.join(args.model_dir, 'confusion_matrix.png'))
