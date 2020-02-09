@@ -4,10 +4,18 @@ import torch
 from model import generate_confusion_matrix_plot, generate_auc_roc_plot, generate_precision_recall_plot 
 
 def test_generate_confusion_matrix_plot():
-    labels = [1, 0, 1, 1, 0, 1]
+    labels = torch.tensor([[1.], [0.], [1.], [1.], [0.], [1.]])
     logits = torch.tensor([-0.2, -0.2, 1.2, 1.2, -0.01, 0.9])
+    _, cm = generate_confusion_matrix_plot(labels, logits)
+    expected_array = np.array([[2, 0], [1, 3]])
+    assert  np.array_equal(cm, expected_array)
+
+def test_generate_confusion_matrix_plot_nan():
+    labels = torch.tensor([[1.], [0.], [1.], [1.], [np.nan], [1.]]) 
+    logits = torch.tensor([[-0.5530], [-0.5023 ], [0.7510], [ 0.6740 ], [-0.8160], [np.nan]]) 
     cm_fig, cm = generate_confusion_matrix_plot(labels, logits)
-    expected_array = np.array([[2, 0],[1, 3]])
+    expected_array = np.array([[2, 0], [1, 2]])
+    print(cm)
     assert  np.array_equal(cm,expected_array )
 
 def test_generate_auc_roc_plot():

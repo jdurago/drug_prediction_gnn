@@ -179,7 +179,7 @@ class Meter(object):
         Parameters
         ----------
         metric_name : str
-            Name for the metric to compute.
+            ame for the metric to compute.
         reduction : str
             Only comes into effect when the metric_name is l1_loss.
             * 'mean': average the metric over all labeled data points for each task
@@ -202,8 +202,14 @@ class Meter(object):
 def generate_confusion_matrix_plot(y_true: np.array, logits: torch.Tensor) -> (matplotlib.figure.Figure, np.array):
     fig = plt.figure()
     ax= plt.subplot()
+
+    y_true = y_true[~torch.isnan(logits)]
+    logits = logits[~torch.isnan(logits)]
+    
     # y_pred = torch.clamp(logits, min=0.0, max=1.0).round().detach().numpy()
     y_pred = torch.round(logit2probability(logits)).detach().numpy()
+    # filter out np.nan values
+    
     try:
         cm = confusion_matrix(y_true, y_pred)
     except ValueError:
